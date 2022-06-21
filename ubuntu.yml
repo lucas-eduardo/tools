@@ -1,0 +1,137 @@
+- name: Preparing Workstation
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Installing Linux Apps
+      become: true
+      apt:
+        name: '{{ item  }}'
+        install_recommends: yes
+        state: present
+      loop:
+        - curl
+        - wget
+        - apt-transport-https
+        - ca-certificates
+        - make
+        - zsh
+        - git
+        - gnupg
+        - lsb-release
+
+    - block:
+      - name: Verify if Oh-My-zsh is installed
+        command: test -d /home/{{ ansible_user_id }}/.oh-my-zsh
+        register: ohmyzsh
+        ignore_errors: true
+        no_log: true
+      
+      - name: Installing Oh-My-zsh
+        shell:
+          cmd: 'curl -fsL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | bash'
+          warn: false
+        when: ohmyzsh.rc != 0
+
+      - name: Changing Default Shell to ZSH
+        become: yes
+        user:
+          name: '{{ ansible_user_id }}'
+          shell: /bin/zsh
+        when: ohmyzsh.rc != 0
+
+      - name: Verify if Theme Oh-My-zsh is installed
+        command: test -d /themes/spaceship-prompt
+        register: theme
+        ignore_errors: true
+        no_log: true
+
+      - name: Download Theme Spaceship
+        become: yes
+        shell:
+          cmd: |
+            git clone https://github.com/denysdovhan/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt"
+            ln -sf "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
+        when: theme.rc != 0
+      
+      - name: Changing Default ZSH Theme to Spaceship
+        lineinfile:
+          path: /home/{{ ansible_user_id }}/.zshrc
+          regexp: '^ZSH_THEME='
+          line: 'ZSH_THEME="spaceship"'
+      
+      - name: Installing Zinit
+        shell:
+          cmd: bash -c "$(curl --fail --show-error --silent --location https://raw.githubusercontent.com/zdharma-continuum/zinit/HEAD/scripts/install.sh)"
+      
+      - name: Add Configure Zinit And Theme
+        blockinfile:
+          path: /home/{{ ansible_user_id }}/.zshrc
+          block: |
+            zinit light zsh-users/zsh-autosuggestions
+            zinit light zsh-users/zsh-completions
+            zinit light zdharma/fast-syntax-highlighting
+
+            SPACESHIP_PROMPT_ORDER=(
+              user
+              dir
+              host
+              git
+              hg
+              exec_time
+              line_sep
+              vi_mode
+              jobs
+              exit_code
+              char
+            )
+
+            SPACESHIP_USER_SHOW="always"
+            SPACESHIP_PROMPT_ADD_NEWLINE=false
+            SPACESHIP_CHAR_SYMBOL="❯"
+            SPACESHIP_CHAR_SUFFIX=" "
+
+            unsetopt PROMPT_SP
+
+    - block:
+      - name: Verify if NVM is installed
+        command: nvm
+        register: nvm
+        ignore_errors: true
+        no_log: true
+
+      - name: Installing NVM
+        shell:
+          cmd: wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
+        when: nvm.rc != 0
+
+    - block:
+      - name: Verify if Docker is installed
+        command: docker
+        register: docker
+        ignore_errors: true
+        no_log: true
+
+      - name: Set up the repository
+        become: true
+        shell:
+          cmd: |
+            mkdir -p /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        when: docker.rc != 0
+
+      - name: Install Docker Engine
+        become: true
+        apt:
+          name: '{{ item  }}'
+          install_recommends: yes
+          state: present
+          update_cache: true
+        loop:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        when: docker.rc != 0
